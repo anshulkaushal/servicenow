@@ -101,6 +101,21 @@ This project implements an event-driven architecture to automatically create cha
 
 ---
 
+## Confluence-Formatted Documents
+
+All key project documents have been formatted for direct copy-paste into Confluence:
+
+### Confluence-Ready Documents
+
+1. **PROJECT_SUMMARY_CONFLUENCE.md** - Project summary in Confluence format
+2. **TOOL_ANALYSIS_CONFLUENCE.md** - Tool analysis in Confluence format  
+3. **ARCHITECTURE_DESIGN_CONFLUENCE.md** - Architecture design in Confluence format
+4. **IMPLEMENTATION_ROADMAP_CONFLUENCE.md** - Implementation roadmap in Confluence format
+
+**Use these for:** Direct copy-paste into Confluence pages. All use Confluence markup syntax (h1, h2, panels, code blocks, tables, checkboxes).
+
+---
+
 ## Supporting Documentation Templates
 
 ### 6. PROJECT_DOCUMENTATION.md
