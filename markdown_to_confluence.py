@@ -209,6 +209,15 @@ def convert_markdown_to_confluence(markdown_text):
 
 
 def main():
+    # Set UTF-8 encoding for stdout on Windows
+    import sys
+    import io
+    if sys.platform == 'win32':
+        try:
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        except AttributeError:
+            pass  # Already wrapped or not needed
+    
     if len(sys.argv) < 2:
         print("Usage: python markdown_to_confluence.py <input.md> [output.txt]")
         print("\nExample:")
@@ -241,14 +250,29 @@ def main():
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write(confluence_content)
     
-    print(f"✓ Converted '{input_file}' to '{output_file}'")
-    print(f"✓ You can now copy the content from '{output_file}' and paste it into Confluence")
-    print(f"\nTo paste in Confluence:")
-    print(f"  1. Open '{output_file}'")
-    print(f"  2. Copy all content (Ctrl+A, Ctrl+C)")
-    print(f"  3. In Confluence, click Edit")
-    print(f"  4. Press Ctrl+Shift+V to paste as plain text")
-    print(f"  5. Click Save")
+    # Use ASCII-safe characters for Windows compatibility
+    try:
+        print(f"[OK] Converted '{input_file}' to '{output_file}'")
+        print(f"[OK] You can now copy the content from '{output_file}' and paste it into Confluence")
+        print(f"\nTo paste in Confluence:")
+        print(f"  1. Open '{output_file}'")
+        print(f"  2. Copy all content (Ctrl+A, Ctrl+C)")
+        print(f"  3. In Confluence, click Edit")
+        print(f"  4. Press Ctrl+Shift+V to paste as plain text")
+        print(f"  5. Click Save")
+    except UnicodeEncodeError:
+        # Fallback for systems with encoding issues
+        import sys
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        print(f"[OK] Converted '{input_file}' to '{output_file}'")
+        print(f"[OK] You can now copy the content from '{output_file}' and paste it into Confluence")
+        print(f"\nTo paste in Confluence:")
+        print(f"  1. Open '{output_file}'")
+        print(f"  2. Copy all content (Ctrl+A, Ctrl+C)")
+        print(f"  3. In Confluence, click Edit")
+        print(f"  4. Press Ctrl+Shift+V to paste as plain text")
+        print(f"  5. Click Save")
 
 
 if __name__ == '__main__':

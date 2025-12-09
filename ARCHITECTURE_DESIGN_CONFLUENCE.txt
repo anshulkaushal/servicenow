@@ -1,0 +1,728 @@
+h1. Event-Driven Integration Architecture Design
+h2. ServiceNow Integration with JIRA, GitHub, Ansible, and Azure Red Hat OpenShift
+
+h2. Document Information
+* _Document Type:_ Architecture Design Document
+* _Project:_ ServiceNow Event-Driven Integration
+* _Version:_ 1.0
+* _Date:_ [Current Date]
+* _Author:_ [Author Name]
+* _Status:_ Draft - Pending Approval
+
+----
+
+h2. 1. Executive Summary
+
+This document describes the architecture for integrating JIRA, GitHub, Ansible Automation Platform, and Azure Red Hat OpenShift with ServiceNow using an event-driven architecture. The solution enables automatic creation of change requests and incident tickets in ServiceNow based on events from these tools, with reliable event processing, acknowledgment mechanisms, and resilience to ServiceNow outages.
+
+h3. 1.1 Key Objectives
+* Automate ticket/change request creation in ServiceNow based on events from integrated tools
+* Provide reliable event processing with queue-based resilience
+* Enable bidirectional communication with acknowledgment mechanisms
+* Support high-volume event processing with scalability
+* Ensure event delivery even during ServiceNow outages
+
+----
+
+h2. 2. Architecture Overview
+
+h3. 2.1 High-Level Architecture
+
+||{code:language=text||collapse=false}||
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│    JIRA     │     │   GitHub    │     │   Ansible   │     │  OpenShift  │
+│             │     │             │     │             │     │             │
+└──────┬──────┘     └──────┬──────┘     └──────┬──────┘     └──────┬──────┘
+       │                   │                   │                   │
+       │  Webhooks/Events  │  Webhooks/Events  │  Webhooks/Events  │  Webhooks/Events
+       │                   │                   │                   │
+       └───────────────────┴───────────────────┴───────────────────┴───────────┐
+                                                                                 │
+                                                                                 ▼
+                                                          ┌──────────────────────────────┐
+                                                          │   Event Management Layer     │
+                                                          │  (Apache Kafka / RabbitMQ)    │
+                                                          │                              │
+                                                          │  • Event Ingestion           │
+                                                          │  • Event Normalization       │
+                                                          │  • Event Enrichment         │
+                                                          │  • Event Queue Management    │
+                                                          └──────────────┬───────────────┘
+                                                                         │
+                                                                         ▼
+                                                          ┌──────────────────────────────┐
+                                                          │   Event Processing Engine    │
+                                                          │  (Custom Middleware/Service) │
+                                                          │                              │
+                                                          │  • Event Filtering          │
+                                                          │  • Event Routing             │
+                                                          │  • Transformation Logic     │
+                                                          │  • Retry Logic              │
+                                                          └──────────────┬───────────────┘
+                                                                         │
+                                                                         ▼
+                                                          ┌──────────────────────────────┐
+                                                          │      ServiceNow API          │
+                                                          │                              │
+                                                          │  • Create Change Request     │
+                                                          │  • Create Incident           │
+                                                          │  • Update Records            │
+                                                          │  • Send Acknowledgment       │
+                                                          └──────────────┬───────────────┘
+                                                                         │
+                                                                         │ Acknowledgment
+                                                                         │ (Change/Incident #)
+                                                                         │
+                                                                         ▼
+                                                          ┌──────────────────────────────┐
+                                                          │   Acknowledgment Handler     │
+                                                          │                              │
+                                                          │  • Receive ACK from SN        │
+                                                          │  • Update Source Systems     │
+                                                          │  • Log Acknowledgment        │
+                                                          └──────────────────────────────┘
+
+{code}
+
+h3. 2.2 Architecture Principles
+
+# _Event-Driven:_ Asynchronous, decoupled event processing
+# _Resilient:_ Queue-based architecture ensures no event loss
+# _Scalable:_ Horizontal scaling capability for high-volume events
+# _Reliable:_ Retry mechanisms and dead letter queue handling
+# _Observable:_ Comprehensive logging and monitoring
+# _Secure:_ End-to-end encryption and authentication
+
+----
+
+h2. 3. Component Architecture
+
+h3. 3.1 Event Sources Layer
+
+h4. 3.1.1 JIRA Integration
+* _Integration Method:_ Webhooks + REST API polling (fallback)
+* _Event Types:_ Issue created/updated, workflow transitions, SLA breaches
+* _Authentication:_ OAuth 2.0 or API tokens
+* _Endpoint:_ {{/webhooks/jira}}
+
+h4. 3.1.2 GitHub Integration
+* _Integration Method:_ GitHub Webhooks
+* _Event Types:_ Workflow runs, deployments, security alerts, PR events
+* _Authentication:_ HMAC signature verification
+* _Endpoint:_ {{/webhooks/github}}
+
+h4. 3.1.3 Ansible Automation Platform Integration
+* _Integration Method:_ Webhooks + REST API
+* _Event Types:_ Job failures, workflow completions, host status changes
+* _Authentication:_ OAuth 2.0 or API tokens
+* _Endpoint:_ {{/webhooks/ansible}}
+
+h4. 3.1.4 Azure Red Hat OpenShift Integration
+* _Integration Method:_ Prometheus Alertmanager webhooks + Kubernetes Watch API
+* _Event Types:_ Pod failures, node issues, resource constraints, deployment failures
+* _Authentication:_ Bearer tokens, mTLS
+* _Endpoint:_ {{/webhooks/openshift}}
+
+h3. 3.2 Event Management Layer
+
+h4. 3.2.1 Event Ingestion Service
+_Purpose:_ Receive and validate events from source systems
+
+_Components:_
+* _Webhook Receivers:_ HTTP endpoints for each tool
+* _Event Validator:_ Validate event authenticity and format
+* _Rate Limiter:_ Prevent event flooding
+* _Event Normalizer:_ Convert events to standard format
+
+_Technology Options:_
+* _Option 1:_ Apache Kafka (Recommended for high volume)
+* _Option 2:_ RabbitMQ (Good for moderate volume)
+* _Option 3:_ Azure Event Hubs (If using Azure infrastructure)
+* _Option 4:_ AWS EventBridge (If using AWS infrastructure)
+
+_Event Schema:_
+||{code:language=json||collapse=false}||
+{
+  "eventId": "uuid",
+||"source": "jira||github||ansible||openshift",||
+||"eventType": "issue_created||workflow_failed||pod_crashed||...",||
+  "timestamp": "ISO8601",
+||"priority": "critical||high||medium||low",||
+  "payload": {
+    // Tool-specific payload
+  },
+  "metadata": {
+    "correlationId": "uuid",
+    "retryCount": 0,
+    "originalTimestamp": "ISO8601"
+  }
+}
+
+{code}
+
+h4. 3.2.2 Event Queue Management
+
+_Primary Queue:_ Active events awaiting processing
+* _Partitioning:_ By source system or priority
+* _Retention:_ 7 days
+* _Replication:_ Multi-replica for high availability
+
+_Dead Letter Queue (DLQ):_ Failed events after max retries
+* _Retention:_ 30 days
+* _Manual Review:_ Required for DLQ events
+* _Alerting:_ Notify administrators of DLQ events
+
+_Priority Queues:_
+* _Critical Queue:_ Critical priority events (immediate processing)
+* _High Queue:_ High priority events
+* _Standard Queue:_ Medium/low priority events
+
+h3. 3.3 Event Processing Engine
+
+h4. 3.3.1 Event Processor Components
+
+_1. Event Filter_
+* Filter duplicate events
+* Filter low-priority/noise events
+* Apply business rules for event relevance
+
+_2. Event Enrichment_
+* Add contextual information
+* Lookup related records
+* Add user/team information
+* Add business context
+
+_3. Event Router_
+* Determine target ServiceNow table (change_request, incident, etc.)
+* Apply routing rules based on event type and content
+* Determine priority and category
+
+_4. Event Transformer_
+* Transform event to ServiceNow record format
+* Map fields from source to ServiceNow
+* Apply data validation and sanitization
+
+_5. Retry Handler_
+* Exponential backoff retry strategy
+* Max retry attempts: 5
+* Retry intervals: 1s, 5s, 30s, 5m, 30m
+* Move to DLQ after max retries
+
+h4. 3.3.2 ServiceNow Integration Logic
+
+_Change Request Creation Rules:_
+* Ansible deployment events → Change Request
+* GitHub production deployments → Change Request
+* OpenShift production deployments → Change Request
+* JIRA issue with "Change" label → Change Request
+
+_Incident Creation Rules:_
+* Ansible job failures → Incident
+* GitHub workflow failures → Incident
+* OpenShift pod crashes → Incident
+* JIRA critical bugs → Incident
+* Security alerts → Incident
+
+_Field Mapping:_
+||{code:language=text||collapse=false}||
+Source Event → ServiceNow Record
+* eventType → short_description
+* source → u_source_system
+* priority → priority
+* timestamp → opened_at
+* payload → description (JSON)
+* correlationId → u_correlation_id
+
+{code}
+
+h3. 3.4 ServiceNow Integration Layer
+
+h4. 3.4.1 ServiceNow API Integration
+
+_REST API Endpoints:_
+* {{POST /api/now/table/change_request}} - Create change request
+* {{POST /api/now/table/incident}} - Create incident
+* {{GET /api/now/table/{table}/{sys_id}}} - Retrieve record
+* {{PUT /api/now/table/{table}/{sys_id}}} - Update record
+
+_Authentication:_
+* OAuth 2.0 (recommended)
+* Basic Auth (fallback)
+* Service Account with appropriate roles
+
+_Rate Limiting:_
+* Respect ServiceNow API rate limits
+* Implement request throttling
+* Queue requests during rate limit periods
+
+h4. 3.4.2 Acknowledgment Mechanism
+
+_Process Flow:_
+# Event processor creates record in ServiceNow
+# ServiceNow returns record with sys_id and number
+# Processor extracts change_request.number or incident.number
+# Processor sends acknowledgment back to source system
+# Source system updates its record with ServiceNow reference
+
+_Acknowledgment Payload:_
+||{code:language=json||collapse=false}||
+{
+  "eventId": "original-event-id",
+  "acknowledgment": {
+    "servicenowRecord": {
+      "sysId": "sys_id",
+      "number": "CHG0012345" or "INC0012345",
+      "table": "change_request" or "incident",
+      "url": "https://servicenow.instance.com/nav_to.do?uri=change_request.do?sys_id=..."
+    },
+    "timestamp": "ISO8601",
+||"status": "created||updated||failed"||
+  }
+}
+
+{code}
+
+h3. 3.5 Resilience and Reliability
+
+h4. 3.5.1 ServiceNow Unavailability Handling
+
+_Detection:_
+* Health check endpoint: {{/api/now/table/sys_user?sysparm_limit=1}}
+* Health check interval: 30 seconds
+* Failure threshold: 3 consecutive failures
+
+_Behavior During Outage:_
+# Events continue to be ingested into queue
+# Event processor detects ServiceNow unavailability
+# Events remain in queue (not processed)
+# Queue continues to accumulate events
+# Health check monitors ServiceNow recovery
+
+_Recovery Process:_
+# ServiceNow health check succeeds
+# Event processor resumes processing
+# Process events in priority order (Critical → High → Standard)
+# Process backlog with rate limiting to avoid overload
+# Monitor processing metrics
+
+_Queue Capacity:_
+* Maximum queue size: 1,000,000 events
+* Alert threshold: 80% capacity
+* Overflow handling: Reject new events or archive old events
+
+h4. 3.5.2 Retry Strategy
+
+_Exponential Backoff:_
+||{code:language=text||collapse=false}||
+Attempt 1: Immediate
+Attempt 2: 1 second delay
+Attempt 3: 5 seconds delay
+Attempt 4: 30 seconds delay
+Attempt 5: 5 minutes delay
+Attempt 6: 30 minutes delay
+Max Attempts: 6
+
+{code}
+
+_Retry Conditions:_
+* ServiceNow API timeout
+* ServiceNow API 5xx errors
+* Network failures
+* Rate limit exceeded (429)
+
+_No Retry Conditions:_
+* ServiceNow API 4xx errors (client errors)
+* Authentication failures
+* Invalid data format
+
+h3. 3.6 Acknowledgment Handler
+
+h4. 3.6.1 Acknowledgment Processing
+
+_Process:_
+# Receive acknowledgment from ServiceNow integration
+# Extract ServiceNow record number and sys_id
+# Identify source system and event
+# Send acknowledgment back to source system
+# Update internal tracking records
+
+_Source System Updates:_
+
+_JIRA:_
+* Add comment with ServiceNow ticket number
+* Update custom field with ServiceNow reference
+* Add link to ServiceNow record
+
+_GitHub:_
+* Add comment to issue/PR with ServiceNow reference
+* Update issue labels
+* Create status check with ServiceNow link
+
+_Ansible:_
+* Update job with ServiceNow reference
+* Add note to job output
+* Update inventory host with ServiceNow ticket
+
+_OpenShift:_
+* Add annotation to resource with ServiceNow reference
+* Update Prometheus alert with ServiceNow ticket
+* Log ServiceNow reference in cluster events
+
+----
+
+h2. 4. Technology Stack Recommendations
+
+h3. 4.1 Option 1: Open Source Stack (Recommended)
+
+_Event Management:_
+* _Apache Kafka:_ Event streaming platform
+* _Kafka Connect:_ Connector framework
+* _Schema Registry:_ Event schema management
+
+_Event Processing:_
+* _Apache Flink / Apache Storm:_ Stream processing
+* _Or:_ Custom microservice (Node.js/Python/Java)
+
+_Message Queue:_
+* _RabbitMQ:_ Message broker (alternative to Kafka)
+
+_Container Platform:_
+* _Kubernetes:_ Container orchestration
+* _Docker:_ Container runtime
+
+_Monitoring:_
+* _Prometheus:_ Metrics collection
+* _Grafana:_ Visualization
+* _ELK Stack:_ Logging
+
+h3. 4.2 Option 2: Cloud-Native Stack
+
+_Azure:_
+* _Azure Event Hubs:_ Event streaming
+* _Azure Functions:_ Event processing
+* _Azure Service Bus:_ Message queue
+* _Azure Monitor:_ Monitoring
+
+_AWS:_
+* _Amazon EventBridge:_ Event bus
+* _AWS Lambda:_ Event processing
+* _Amazon SQS:_ Message queue
+* _CloudWatch:_ Monitoring
+
+h3. 4.3 Option 3: Hybrid Approach
+
+_Event Management:_
+* _Apache Kafka:_ On-premises or cloud
+* _Or:_ RabbitMQ for moderate volume
+
+_Event Processing:_
+* _Custom microservice:_ Deployed on Kubernetes
+* _Language:_ Python (recommended) or Node.js
+
+_ServiceNow Integration:_
+* _ServiceNow REST API:_ Direct integration
+* _ServiceNow IntegrationHub:_ For complex integrations
+
+----
+
+h2. 5. Deployment Architecture
+
+h3. 5.1 Component Deployment
+
+||{code:language=text||collapse=false}||
+┌─────────────────────────────────────────────────────────┐
+│                    Kubernetes Cluster                    │
+│                                                          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
+│  │   Webhook    │  │   Webhook    │  │   Webhook    │  │
+│  │  Receivers   │  │  Receivers   │  │  Receivers   │  │
+│  │  (JIRA/Git)  │  │ (Ansible/    │  │ (OpenShift)  │  │
+│  │              │  │  Others)     │  │              │  │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  │
+│         │                 │                 │          │
+│         └─────────────────┴─────────────────┘          │
+│                        │                               │
+│                        ▼                               │
+│         ┌──────────────────────────────┐              │
+│         │   Event Ingestion Service    │              │
+│         │   (Validates & Normalizes)   │              │
+│         └──────────────┬───────────────┘              │
+│                        │                               │
+│                        ▼                               │
+│         ┌──────────────────────────────┐              │
+│         │      Kafka Cluster           │              │
+│         │  (Event Queue Management)    │              │
+│         └──────────────┬───────────────┘              │
+│                        │                               │
+│         ┌──────────────┴───────────────┐              │
+│         │                              │              │
+│         ▼                              ▼              │
+│  ┌──────────────┐            ┌──────────────┐        │
+│  │   Critical   │            │   Standard   │        │
+│  │    Queue     │            │    Queue     │        │
+│  └──────┬───────┘            └──────┬───────┘        │
+│         │                           │                 │
+│         └───────────┬───────────────┘                 │
+│                     │                                 │
+│                     ▼                                 │
+│         ┌──────────────────────────────┐             │
+│         │  Event Processing Engine     │             │
+│         │  (Filter, Enrich, Transform) │             │
+│         └──────────────┬───────────────┘             │
+│                        │                              │
+│                        ▼                              │
+│         ┌──────────────────────────────┐             │
+│         │   ServiceNow API Client      │             │
+│         │   (Create Records, ACK)      │             │
+│         └──────────────┬───────────────┘             │
+│                        │                              │
+│                        ▼                              │
+│         ┌──────────────────────────────┐             │
+│         │  Acknowledgment Handler      │             │
+│         │  (Update Source Systems)     │             │
+│         └──────────────────────────────┘             │
+│                                                       │
+└───────────────────────────────────────────────────────┘
+
+{code}
+
+h3. 5.2 High Availability Design
+
+_Event Management:_
+* Kafka: 3+ brokers (replication factor: 3)
+* Multiple partitions for parallel processing
+* Consumer groups for load distribution
+
+_Event Processing:_
+* Multiple processing instances (horizontal scaling)
+* Auto-scaling based on queue depth
+* Health checks and automatic restart
+
+_ServiceNow Integration:_
+* Connection pooling
+* Circuit breaker pattern
+* Graceful degradation
+
+----
+
+h2. 6. Security Architecture
+
+h3. 6.1 Authentication and Authorization
+
+_Source Systems → Event Ingestion:_
+* JIRA: OAuth 2.0 or API tokens
+* GitHub: HMAC signature verification
+* Ansible: OAuth 2.0 or API tokens
+* OpenShift: Bearer tokens, mTLS
+
+_Event Processing → ServiceNow:_
+* OAuth 2.0 (recommended)
+* Service Account with minimal required permissions
+* Token rotation and refresh
+
+_Internal Components:_
+* Mutual TLS (mTLS) between services
+* Service mesh (Istio/Linkerd) for service-to-service communication
+
+h3. 6.2 Data Security
+
+_Encryption:_
+* TLS 1.3 for data in transit
+* Encryption at rest for queues and databases
+* Encrypted secrets management (HashiCorp Vault, AWS Secrets Manager)
+
+_Data Privacy:_
+* PII masking in logs
+* Data retention policies
+* GDPR compliance considerations
+
+----
+
+h2. 7. Monitoring and Observability
+
+h3. 7.1 Metrics
+
+_Key Metrics:_
+* Event ingestion rate (events/second)
+* Event processing latency (p50, p95, p99)
+* Queue depth (by priority)
+* ServiceNow API success/failure rate
+* Acknowledgment delivery rate
+* Dead letter queue size
+* ServiceNow availability status
+
+h3. 7.2 Logging
+
+_Log Levels:_
+* ERROR: Failed events, ServiceNow outages
+* WARN: Retries, rate limiting
+* INFO: Event processing, record creation
+* DEBUG: Detailed event flow
+
+_Log Aggregation:_
+* Centralized logging (ELK Stack, Splunk)
+* Structured logging (JSON format)
+* Correlation IDs for tracing
+
+h3. 7.3 Alerting
+
+_Critical Alerts:_
+* ServiceNow unavailable
+* Queue capacity > 80%
+* Dead letter queue growth
+* Processing latency > threshold
+
+_Warning Alerts:_
+* High retry rate
+* Rate limiting encountered
+* Acknowledgment delivery failures
+
+----
+
+h2. 8. Data Flow Diagrams
+
+h3. 8.1 Normal Event Flow
+
+||{code:language=text||collapse=false}||
+# Source System (JIRA) → Webhook → Event Ingestion Service
+# Event Ingestion → Validate & Normalize → Kafka Queue
+# Kafka Queue → Event Processor → Filter & Enrich
+# Event Processor → Transform → ServiceNow API
+# ServiceNow → Create Record → Return sys_id & number
+# Event Processor → Extract number → Acknowledgment Handler
+# Acknowledgment Handler → Update JIRA → Add comment with ticket #
+
+{code}
+
+h3. 8.2 ServiceNow Unavailable Flow
+
+||{code:language=text||collapse=false}||
+# Source System → Webhook → Event Ingestion → Kafka Queue
+# Event Processor → Health Check → ServiceNow Unavailable
+# Event Processor → Skip Processing → Event Remains in Queue
+# Queue Continues to Accumulate Events
+# Health Check → ServiceNow Available
+# Event Processor → Resume Processing → Process Backlog (Priority Order)
+
+{code}
+
+h3. 8.3 Retry Flow
+
+||{code:language=text||collapse=false}||
+# Event Processor → ServiceNow API → Timeout/5xx Error
+# Event Processor → Increment Retry Count → Apply Backoff
+# Event Processor → Retry After Backoff → Success
+# OR: Max Retries Reached → Move to Dead Letter Queue
+# Administrator → Review DLQ → Manual Processing/Resolution
+
+{code}
+
+----
+
+h2. 9. Integration Patterns
+
+h3. 9.1 Event-to-Ticket Mapping
+
+|| Source || Event Type || ServiceNow Table || Priority Mapping ||
+|| JIRA || Change Request || Change Request || High → 2 ||
+|| GitHub || Workflow Failed || Incident || Critical → 1 ||
+|| GitHub || Security Alert || Incident || Critical → 1 ||
+|| Ansible || Job Failed || Incident || High → 2 ||
+|| Ansible || Deployment || Change Request || Medium → 3 ||
+|| OpenShift || Pod CrashLoop || Incident || Critical → 1 ||
+|| OpenShift || Deployment || Change Request || High → 2 ||
+
+h3. 9.2 Field Mapping Examples
+
+_JIRA Issue → ServiceNow Incident:_
+||{code:language=text||collapse=false}||
+JIRA.issue.key → u_jira_ticket
+JIRA.issue.summary → short_description
+JIRA.issue.description → description
+JIRA.issue.priority → priority (mapped)
+JIRA.issue.assignee → assigned_to (lookup)
+JIRA.issue.created → opened_at
+
+{code}
+
+_GitHub Workflow → ServiceNow Incident:_
+||{code:language=text||collapse=false}||
+GitHub.workflow.name → short_description
+GitHub.workflow.conclusion → u_github_status
+GitHub.repository.full_name → u_github_repo
+GitHub.workflow.run_url → u_workflow_url
+GitHub.workflow.created_at → opened_at
+
+{code}
+
+----
+
+h2. 10. Scalability Considerations
+
+h3. 10.1 Horizontal Scaling
+
+_Event Ingestion:_
+* Multiple webhook receiver instances
+* Load balancer for distribution
+* Stateless design
+
+_Event Processing:_
+* Consumer groups for parallel processing
+* Auto-scaling based on queue depth
+* Partition-based parallelism
+
+h3. 10.2 Performance Optimization
+
+_Caching:_
+* Cache ServiceNow lookups (users, CIs)
+* Cache authentication tokens
+* Cache routing rules
+
+_Batch Processing:_
+* Batch acknowledgments when possible
+* Batch ServiceNow API calls (if supported)
+* Optimize database queries
+
+----
+
+h2. 11. Disaster Recovery
+
+h3. 11.1 Backup Strategy
+
+_Event Queue:_
+* Kafka replication across data centers
+* Regular backups of queue state
+* Configuration backups
+
+_Processing State:_
+* Database backups for processing state
+* Configuration version control
+* Secrets backup (encrypted)
+
+h3. 11.2 Recovery Procedures
+
+_Queue Recovery:_
+* Replay events from backup if needed
+* Process events in chronological order
+* Validate event integrity
+
+_Service Recovery:_
+* Automated failover to secondary region
+* Health check-based routing
+* Gradual traffic ramp-up
+
+----
+
+h2. Document Approval
+
+|| Role || Name || Signature || Date ||
+|| Technical Lead || [Name] || || ||
+|| ServiceNow Admin || [Name] || || ||
+|| Project Manager || [Name] || || ||
+
+----
+
+h2. Document History
+
+|| Version || Date || Author || Changes ||
+
