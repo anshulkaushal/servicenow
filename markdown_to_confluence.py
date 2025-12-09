@@ -27,19 +27,51 @@ if sys.platform == 'win32':
 
 def convert_headers(text):
     """Convert Markdown headers to Confluence headers"""
-    # h1: # Header -> h1. Header
-    text = re.sub(r'^# (.+)$', r'h1. \1', text, flags=re.MULTILINE)
-    # h2: ## Header -> h2. Header
-    text = re.sub(r'^## (.+)$', r'h2. \1', text, flags=re.MULTILINE)
-    # h3: ### Header -> h3. Header
-    text = re.sub(r'^### (.+)$', r'h3. \1', text, flags=re.MULTILINE)
-    # h4: #### Header -> h4. Header
-    text = re.sub(r'^#### (.+)$', r'h4. \1', text, flags=re.MULTILINE)
-    # h5: ##### Header -> h5. Header
-    text = re.sub(r'^##### (.+)$', r'h5. \1', text, flags=re.MULTILINE)
-    # h6: ###### Header -> h6. Header
-    text = re.sub(r'^###### (.+)$', r'h6. \1', text, flags=re.MULTILINE)
-    return text
+    lines = text.split('\n')
+    result = []
+    
+    for line in lines:
+        original_line = line
+        stripped = line.lstrip()
+        
+        # Process from h6 to h1 (most specific first) to avoid conflicts
+        # Match headers with required space after #
+        if stripped.startswith('###### '):
+            # h6: ###### Header -> h6. Header
+            header_text = stripped[7:].strip()  # Remove '###### '
+            # Remove trailing # if present
+            header_text = header_text.rstrip('#').strip()
+            result.append(f'h6. {header_text}')
+        elif stripped.startswith('##### '):
+            # h5: ##### Header -> h5. Header
+            header_text = stripped[6:].strip()  # Remove '##### '
+            header_text = header_text.rstrip('#').strip()
+            result.append(f'h5. {header_text}')
+        elif stripped.startswith('#### '):
+            # h4: #### Header -> h4. Header
+            header_text = stripped[5:].strip()  # Remove '#### '
+            header_text = header_text.rstrip('#').strip()
+            result.append(f'h4. {header_text}')
+        elif stripped.startswith('### '):
+            # h3: ### Header -> h3. Header
+            header_text = stripped[4:].strip()  # Remove '### '
+            header_text = header_text.rstrip('#').strip()
+            result.append(f'h3. {header_text}')
+        elif stripped.startswith('## '):
+            # h2: ## Header -> h2. Header
+            header_text = stripped[3:].strip()  # Remove '## '
+            header_text = header_text.rstrip('#').strip()
+            result.append(f'h2. {header_text}')
+        elif stripped.startswith('# '):
+            # h1: # Header -> h1. Header
+            header_text = stripped[2:].strip()  # Remove '# '
+            header_text = header_text.rstrip('#').strip()
+            result.append(f'h1. {header_text}')
+        else:
+            # Not a header, keep as-is
+            result.append(original_line)
+    
+    return '\n'.join(result)
 
 
 def convert_bold(text):
