@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Batch converter: Convert all Markdown files to Confluence format
 
@@ -12,6 +13,15 @@ Usage:
 import os
 import subprocess
 import sys
+import io
+
+# Fix encoding for Windows console
+if sys.platform == 'win32':
+    try:
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    except (AttributeError, TypeError):
+        pass  # Already wrapped or not applicable
 
 # List of Markdown files to convert
 MARKDOWN_FILES = [
@@ -38,7 +48,14 @@ def convert_file(input_file, output_file=None):
         cmd = [sys.executable, script_path, input_file]
     
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        # Set UTF-8 encoding for subprocess output
+        result = subprocess.run(
+            cmd, 
+            capture_output=True, 
+            text=True,
+            encoding='utf-8',
+            errors='replace'
+        )
         if result.returncode == 0:
             print(result.stdout)
             return True
@@ -70,14 +87,14 @@ def main():
                 failed += 1
                 print()
         else:
-            print(f"⚠ Skipping {md_file} (file not found)")
+            print(f"[SKIP] Skipping {md_file} (file not found)")
             print()
     
     print("=" * 60)
     print(f"Conversion complete!")
-    print(f"  ✓ Successfully converted: {converted} files")
+    print(f"  [OK] Successfully converted: {converted} files")
     if failed > 0:
-        print(f"  ✗ Failed: {failed} files")
+        print(f"  [ERROR] Failed: {failed} files")
     print("=" * 60)
     print()
     print("Next steps:")
